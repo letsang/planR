@@ -11,6 +11,7 @@
 library(shiny)
 library(shinyjs)
 library(shinyWidgets)
+library(shinycssloaders)
 # Time series & Forecast
 library(forecast)
 # Data Visualization
@@ -48,6 +49,7 @@ port <- 8888
 ### ONE DRIVE ###
 odb <- get_business_onedrive()
 items <- odb$list_items("planR/seasonality")
+odb$download_file(src = paste0("planR/seasonality/",items$name[1]), paste0("seasonality\\",items$name[1]), overwrite = TRUE)
 
 ### UI FONT CONSTANTS
 t <- list(
@@ -66,11 +68,23 @@ base <- readRDS("base.rds")
 ### SERVER ###
 server <- function(input, output, session) {
   
-  values <- reactiveValues()
+  values <- reactiveValues(
+    smc = "698651AAANG1000",
+    week0 = 50,
+    year0 = 2022,
+    items = odb$list_items("planR/seasonality"),
+    seasonality = read_excel(paste0("seasonality\\",items$name[1]))
+  )
   
   observe({
     values$smc <- input$smc
     # updateSelectizeInput(session, "smc", choices = unique(base$SMC[base$SMC %in% input$dep]))
+  })
+  
+  observeEvent(input$update,{
+    odb$download_file(src = paste0("planR/seasonality/", input$weight), paste0("seasonality\\",input$weight), overwrite = TRUE)
+    values$seasonality <- read_excel(paste0("seasonality\\",input$weight))
+    updateSelectizeInput(session, "weight", choices = odb$list_items("planR/seasonality")$name, selected = NULL)
   })
   
   ### UPDATE PACKSHOT ###
@@ -79,7 +93,7 @@ server <- function(input, output, session) {
   })
 
   res <- reactive({
-    tmp <- base %>% filter(SMC == input$smc) %>% mutate(AWS = 0, Forecast = 0, WOC = 4, Closing = 0, Need = 0)
+    tmp <- base %>% full_join(values$seasonality, by = "Week") %>% filter(SMC == input$smc) %>% mutate(AWS = 0, Forecast = 0, WOC = 4, Closing = 0, Need = 0)
     ### AWS ###  
     for(i in 1:nrow(tmp)){
       if(i %in% 1:4){
@@ -91,12 +105,12 @@ server <- function(input, output, session) {
     
     ### FORECAST & NEED ###
     for(i in 1:nrow(tmp)){
-      if(tmp$Week[i] < 50 & tmp$Year[i] <= 2022){
+      if(tmp$Week[i] < values$week0 & tmp$Year[i] <= values$year0){
         tmp$Forecast[i] <- 0
         tmp$Closing[i] <- 0
         tmp$Need[i] <- 0
       }else{
-        tmp$Forecast[i] <- round(tmp[tmp$Week == 50 & tmp$Year == 2022, "AWS"]*52*tmp$Weight[i])
+        tmp$Forecast[i] <- round(tmp[tmp$Week == values$week0 & tmp$Year == values$year0, "AWS"]*52*tmp$Weight[i])
         tmp$Closing[i] <- round(max(0,(tmp$Closing[i-1] + tmp$OH[i] + tmp$PFP[i] - tmp$Forecast[i])))
         tmp$Need[i] <- round(min(0,(tmp$Closing[i] - tmp$Forecast[i] - tmp$Forecast[i+1] - tmp$Forecast[i+2] - tmp$Forecast[i+3]))*-1)
       }
@@ -134,7 +148,7 @@ server <- function(input, output, session) {
 
 ### CLIENT ###
 ui <- navbarPage(
-  htmltools::tags$img(src = "https://www.ysl.com/on/demandware.static/-/Library-Sites-Library-SLP/default/dw86be354f/images/logo.svg", height = "20px"),
+  htmltools::tags$img(src = "https://www.ysl.com/on/demandware.static/-/Library-Sites-Library-SLP/default/dw86be354f/images/logo.svg", height = "15px"),
   tabPanel("★",
            fluidPage(
              htmltools::tags$style(HTML("body {font-family:'Helvetica',sans-serif; font-size:10px
@@ -149,17 +163,22 @@ ui <- navbarPage(
                                         .irs-from, .irs-to, .irs-single { 
                                                   background: black
                                                   }"
-             )
-             ),
+             )),
              fluidRow(
                column(6,
-                      selectizeInput("dep", "Department :", choices = unique(base$Department), selected = "HANDBAGS", multiple = TRUE),
+                      # selectizeInput("dep", "Department :", choices = unique(base$Department), selected = "HANDBAGS", multiple = TRUE),
                       selectizeInput("smc", "Style Material Color :", choices = unique(base$SMC), selected = "698651AAANG1000", multiple = FALSE, options = list(maxOptions = 10)),
-                      selectizeInput("weight", "Seasonality :", choices = items$name, selected = items$name[1], multiple = FALSE)
+                      # selectizeInput("weight", "Seasonality :", choices = items$name, selected = items$name[1], multiple = FALSE),
+                      div(style="display:inline-block;",
+                          fluidRow(
+                            column(10, selectizeInput("weight", "Seasonality :", choices = items$name, selected = items$name[1], multiple = FALSE)),
+                            column(2, actionButton("update", "", icon = icon("refresh"), style="color: #fff; background-color: #000; border-color: #000"))
+                            )
+                          )
                       ),
-               column(6, uiOutput("picture")),
-               column(12, plotlyOutput("plot")),
-               column(12, DT::dataTableOutput("table"))
+               column(6, shinycssloaders::withSpinner(uiOutput("picture"), type = 7)),
+               column(12, shinycssloaders::withSpinner(plotlyOutput("plot"), type = 7)),
+               column(12, shinycssloaders::withSpinner(DT::dataTableOutput("table"), type = 7))
              ),
            )
   )
