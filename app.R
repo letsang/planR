@@ -73,12 +73,15 @@ server <- function(input, output, session) {
     week0 = 50,
     year0 = 2022,
     items = odb$list_items("planR/seasonality"),
-    seasonality = read_excel(paste0("seasonality\\",items$name[1]))
+    seasonality = read_excel(paste0("seasonality\\",items$name[1])),
+    switch = TRUE,
+    woc = "Sales"
   )
   
   observe({
     values$smc <- input$smc
-    # updateSelectizeInput(session, "smc", choices = unique(base$SMC[base$SMC %in% input$dep]))
+    values$switch <- input$view
+    values$woc <- input$woc
   })
   
   observeEvent(input$update,{
@@ -87,9 +90,14 @@ server <- function(input, output, session) {
     updateSelectizeInput(session, "weight", choices = odb$list_items("planR/seasonality")$name, selected = NULL)
   })
   
+  # observeEvent(input$dep,{
+  #   tmp <- base %>% filter(Department %in% input$dep) %>% group_by(SMC) %>% summarise(Sales = sum(Sales)) %>% arrange(desc(Sales)) %>% head(10)
+  #   updateSelectizeInput(session, "smc", choices = tmp$SMC, selected = NULL)
+  # })
+  
   ### UPDATE PACKSHOT ###
   output$picture <- renderUI({
-    htmltools::tags$img(src=paste0("https://getmedia.pdi.keringapps.com/image/pijqmiaszv/", values$smc), height="200px")
+    htmltools::tags$img(src=paste0("https://getmedia.pdi.keringapps.com/image/pijqmiaszv/", values$smc), height="220px")
   })
 
   res <- reactive({
@@ -130,17 +138,45 @@ server <- function(input, output, session) {
   
   output$plot <- renderPlotly({
     
-    plot_ly(res()) %>% 
-      add_trace(x = ~Time, y = ~OH, type = "bar", name ="OH") %>%
-      add_trace(x = ~Time, y = ~Closing, type = "bar", name ="Stock Proj") %>%
-      add_trace(x = ~Time, y = ~Need, type = "bar", name ="Reorder") %>%
-      add_trace(x = ~Time, y = ~Forecast, type = "scatter", name ="Forecast", mode='markers+lines', yaxis = "y2", marker = list(color = "red"), opacity=1) %>%
-      add_trace(x = ~Time, y = ~Sales, type = "scatter", name ="Sales", mode='markers+lines', yaxis = "y2", marker = list(color = "blue"), opacity=1) %>%
-      layout(xaxis = list(title = list(text=""), dtick=1, tickfont = list(size = 8), font = t),
-             yaxis = list(title = list(text=""), tickfont = list(size = 8), font = t, rangemode = "nonnegative"),
-             yaxis2 = list(title = list(text=""), tickfont = list(size = 8), font = t, rangemode = "nonnegative", overlaying = "y", side = "right"),
-             margin = list(r = 50),
-             showlegend = FALSE)
+    if(values$woc == "Sales") {
+      if(values$switch == TRUE){
+        plot_ly(res()) %>% 
+          add_trace(x = ~Time, y = ~OH, type = "bar", name ="OH") %>%
+          add_trace(x = ~Time, y = ~Closing, type = "bar", name ="Stock Proj") %>%
+          add_trace(x = ~Time, y = ~Need, type = "bar", name ="Reorder") %>%
+          add_trace(x = ~Time, y = ~Forecast, type = "scatter", name ="Forecast", mode='markers+lines', yaxis = "y2", marker = list(color = "red"), opacity=1) %>%
+          add_trace(x = ~Time, y = ~Sales, type = "scatter", name ="Sales", mode='markers+lines', yaxis = "y2", marker = list(color = "blue"), opacity=1) %>%
+          layout(xaxis = list(title = list(text=""), dtick=1, tickfont = list(size = 8), font = t),
+                 yaxis = list(title = list(text=""), tickfont = list(size = 8), font = t, rangemode = "nonnegative"),
+                 yaxis2 = list(title = list(text=""), tickfont = list(size = 8), font = t, rangemode = "nonnegative", overlaying = "y", side = "right"),
+                 margin = list(r = 50),
+                 showlegend = FALSE)
+      } else {
+        plot_ly(res()) %>% 
+          add_trace(x = ~Time, y = ~OH, type = "bar", name ="OH") %>%
+          add_trace(x = ~Time, y = ~Closing, type = "bar", name ="Stock Proj") %>%
+          add_trace(x = ~Time, y = ~Need, type = "bar", name ="Reorder") %>%
+          add_trace(x = ~Time, y = ~Forecast, type = "scatter", name ="Forecast", mode='markers+lines', marker = list(color = "red"), opacity=1) %>%
+          add_trace(x = ~Time, y = ~Sales, type = "scatter", name ="Sales", mode='markers+lines', marker = list(color = "blue"), opacity=1) %>%
+          layout(xaxis = list(title = list(text=""), dtick=1, tickfont = list(size = 8), font = t),
+                 yaxis = list(title = list(text=""), tickfont = list(size = 8), font = t, rangemode = "nonnegative"),
+                 margin = list(r = 50),
+                 showlegend = FALSE)
+      }
+    } else {
+      plot_ly(res()) %>% mutate(Actual_WOC = ifelse(Week < values$week0 & Year <= values$year0, OH/AWS, Closing/Forecast)) %>%
+        add_trace(x = ~Time, y = ~OH, type = "bar", name ="OH") %>%
+        add_trace(x = ~Time, y = ~Closing, type = "bar", name ="Stock Proj") %>%
+        add_trace(x = ~Time, y = ~Need, type = "bar", name ="Reorder") %>%
+        add_trace(x = ~Time, y = ~Actual_WOC, type = "scatter", name ="Actual WOC", mode='markers+lines', yaxis = "y2", marker = list(color = "red"), opacity=1) %>%
+        layout(xaxis = list(title = list(text=""), dtick=1, tickfont = list(size = 8), font = t),
+               yaxis = list(title = list(text=""), tickfont = list(size = 8), font = t, rangemode = "nonnegative"),
+               yaxis2 = list(title = list(text=""), tickfont = list(size = 8), font = t, rangemode = "nonnegative", overlaying = "y", side = "right"),
+               margin = list(r = 50),
+               showlegend = FALSE)
+    }
+    
+
     
   })
   
@@ -161,28 +197,39 @@ ui <- navbarPage(
                                                   }
 
                                         .irs-from, .irs-to, .irs-single { 
-                                                  background: black
-                                                  }"
+                                                  background: black;
+                                                  }
+                                        "
              )),
+             # fluidRow(
+             #   column(6,
+             #          # selectizeInput("dep", "Department :", choices = unique(base$Department), selected = "HANDBAGS", multiple = TRUE),
+             #          selectizeInput("smc", "Style Material Color :", choices = unique(base$SMC), selected = "698651AAANG1000", multiple = FALSE, options = list(maxOptions = 10)),
+             #          div(style="display:inline-block;",
+             #              fluidRow(
+             #                column(8, selectizeInput("weight", "Seasonality :", choices = items$name, selected = items$name[1], multiple = FALSE)),
+             #                column(4, actionButton("update", "", icon = icon("refresh"), style="color: #fff; background-color: #000; border-color: #000"))
+             #                )
+             #              )
+             #          ),
+               sidebarPanel(
+                 width = 3,
+                 selectizeInput("smc", "Style Material Color :", choices = unique(base$SMC), selected = "698651AAANG1000", multiple = FALSE, options = list(maxOptions = 10)),
+                 selectizeInput("weight", "Seasonality :", choices = items$name, selected = items$name[1], multiple = FALSE),
+                 actionButton("update", "", icon = icon("refresh"), style="color: #fff; background-color: #000; border-color: #000")
+                 ),
+             column(9, shinycssloaders::withSpinner(uiOutput("picture"), type = 7)),
              fluidRow(
-               column(6,
-                      # selectizeInput("dep", "Department :", choices = unique(base$Department), selected = "HANDBAGS", multiple = TRUE),
-                      selectizeInput("smc", "Style Material Color :", choices = unique(base$SMC), selected = "698651AAANG1000", multiple = FALSE, options = list(maxOptions = 10)),
-                      # selectizeInput("weight", "Seasonality :", choices = items$name, selected = items$name[1], multiple = FALSE),
-                      div(style="display:inline-block;",
-                          fluidRow(
-                            column(10, selectizeInput("weight", "Seasonality :", choices = items$name, selected = items$name[1], multiple = FALSE)),
-                            column(2, actionButton("update", "", icon = icon("refresh"), style="color: #fff; background-color: #000; border-color: #000"))
-                            )
-                          )
-                      ),
-               column(6, shinycssloaders::withSpinner(uiOutput("picture"), type = 7)),
+               column(9, radioButtons(inputId = "woc", label = "", choices = c("Sales", "WOC"), selected = "Sales", inline = TRUE)),
+               column(3, materialSwitch(inputId = "view", value = TRUE, status = "default", inline = TRUE))
+             ),
+               # column(12, materialSwitch(inputId = "view", value = TRUE, status = "default", inline = TRUE)),
                column(12, shinycssloaders::withSpinner(plotlyOutput("plot"), type = 7)),
                column(12, shinycssloaders::withSpinner(DT::dataTableOutput("table"), type = 7))
              ),
            )
   )
-)
+# )
 
 # Run the application 
 app <- shinyApp(ui = ui, server = server)
